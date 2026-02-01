@@ -1,6 +1,6 @@
 {
   "name": "orange-tpot",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Tooling to create creator repos from blogger directory and index repo",
   "type": "module",
   "scripts": {

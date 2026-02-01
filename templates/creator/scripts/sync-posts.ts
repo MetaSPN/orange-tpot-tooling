@@ -199,7 +199,10 @@ async function main(): Promise<void> {
   }
 
   const outPath = join(ROOT, BLOG_TOOLKIT_OUTPUT);
-  const result = spawnSync("uvx", ["blog-toolkit", "pull", blogUrl, "-o", outPath, "--format", "json"], {
+  const isSubstack = blogUrl.includes("substack.com");
+  const args = ["blog-toolkit", "pull", blogUrl, "-o", outPath, "--format", "json"];
+  if (isSubstack) args.push("--method", "sitemap");
+  const result = spawnSync("uvx", args, {
     cwd: ROOT,
     stdio: "inherit",
     shell: false,
