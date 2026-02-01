@@ -1,0 +1,19 @@
+{
+  "name": "orange-tpot",
+  "version": "0.1.0",
+  "description": "Tooling to create creator repos from blogger directory and index repo",
+  "type": "module",
+  "scripts": {
+    "build": "bun build src/cli.ts --outdir=dist --target=bun",
+    "start": "bun run src/cli.ts",
+    "create-creator": "bun run src/cli.ts create-creator",
+    "create-index": "bun run src/cli.ts create-index",
+    "export-creators": "bun run scripts/export-creators.ts"
+  },
+  "bin": {
+    "orange-tpot": "./src/cli.ts"
+  },
+  "devDependencies": {
+    "@types/bun": "latest"
+  }
+}

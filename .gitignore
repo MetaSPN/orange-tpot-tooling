@@ -1,0 +1,15 @@
+# Blogger data dump — never commit
+Private & Shared/
+**/Orange TPOT Directory*.csv
+
+# Dependencies and build
+node_modules/
+dist/
+*.tsbuildinfo
+
+# Environment
+.env
+.env.local
+
+# OS
+.DS_Store

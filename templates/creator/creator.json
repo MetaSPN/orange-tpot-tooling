@@ -1,0 +1,11 @@
+{
+  "displayName": "{{displayName}}",
+  "blogName": "{{blogName}}",
+  "blogUrl": "{{blogUrl}}",
+  "followUrl": "{{followUrl}}",
+  "imageUrl": "{{imageUrl}}",
+  "feedUrls": {{feedUrlsJson}},
+  "slug": "{{slug}}",
+  "hexId": "{{hexId}}",
+  "supplementStrategy": "{{supplementStrategy}}"
+}
