@@ -11,6 +11,17 @@ Run the interactive flow without cloning this repo:
 
 Running the command with **no arguments** starts the **interactive** flow: pick from a master list, enter a creator manually, or use a local blogger directory.
 
+**If you see old errors or stale behavior**, Bun may be using a cached copy of the repo. Clear the cache and run again:
+
+- From a directory that has a `package.json` (any Bun/Node project):  
+  `bun pm cache rm`  
+  then `bunx github:metaspn/orange-tpot-tooling`
+- From anywhere (no package.json needed): remove the global cache manually, then run bunx:
+  ```bash
+  rm -rf ~/.bun/install/cache
+  bunx github:metaspn/orange-tpot-tooling
+  ```
+
 ## Setup (clone for development or local directory)
 
 - **Bun** (recommended): `bun install`

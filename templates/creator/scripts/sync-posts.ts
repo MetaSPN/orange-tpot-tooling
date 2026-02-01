@@ -87,25 +87,41 @@ function getItemPubDate(item: RssItemExtended): Date | null {
 function extractSubstackPostUrls(html: string, archiveBaseUrl: string): string[] {
   const seen = new Set<string>();
   const base = archiveBaseUrl.replace(/\/?$/, "");
-  // Match href="..."/p/... or href='...'/p/...
-  const re = /href\s*=\s*["']([^"']*\/p\/[^"']+)["']/gi;
+  const origin = new URL(base).origin;
+
+  // 1) Match href="..."/p/... or href='...'/p/...
+  const hrefRe = /href\s*=\s*["']([^"']*\/p\/[^"']+)["']/gi;
   let m: RegExpExecArray | null;
-  while ((m = re.exec(html)) !== null) {
+  while ((m = hrefRe.exec(html)) !== null) {
     const raw = m[1].trim();
     try {
       const u = new URL(raw, base);
       if (!u.pathname.includes("/p/")) continue;
-      // Only post pages: /p/slug (one segment after /p/), not /p/slug/comments or /p/slug/anything
       const match = u.pathname.match(/^\/p\/([^/]+)\/?$/);
       if (!match) continue;
       u.hash = "";
       u.pathname = `/p/${match[1]}`;
+      u.search = "";
       const normalized = u.toString();
       if (!seen.has(normalized)) seen.add(normalized);
     } catch {
       // skip invalid
     }
   }
+
+  // 2) Fallback: find /p/slug anywhere in HTML (e.g. in JSON or data), exclude /p/slug/comments
+  const slugRe = /\/p\/([^/"'\s]+)/g;
+  while ((m = slugRe.exec(html)) !== null) {
+    const slug = m[1];
+    if (!slug || slug === "comments") continue;
+    try {
+      const normalized = `${origin}/p/${slug}`;
+      if (!seen.has(normalized)) seen.add(normalized);
+    } catch {
+      // skip
+    }
+  }
+
   return [...seen];
 }
 
@@ -220,7 +236,12 @@ async function main() {
   if (isSubstack && strategy === "substack_archive") {
     try {
       const archiveUrl = new URL("/archive", blogUrl).href;
-      const res = await fetch(archiveUrl);
+      const res = await fetch(archiveUrl, {
+        headers: {
+          "User-Agent":
+            "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        },
+      });
       const html = await res.text();
       const postUrls = extractSubstackPostUrls(html, archiveUrl);
       for (const postUrl of postUrls) {
