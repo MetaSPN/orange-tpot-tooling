@@ -5,8 +5,5 @@
   "type": "module",
   "scripts": {
     "sync": "bun run scripts/sync-posts.ts"
-  },
-  "dependencies": {
-    "rss-parser": "^3.13.0"
   }
 }

@@ -5,8 +5,9 @@ Private & Shared/
 # Dependencies and build
 node_modules/
 dist/
+output/
 *.tsbuildinfo
-
+test-creator/
 # Environment
 .env
 .env.local

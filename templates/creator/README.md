@@ -13,7 +13,9 @@ Blog archive and metadata for **{{displayName}}**.
 
 ## Sync
 
-A GitHub Action runs daily to pull new posts from the blog/Substack feed into `posts/` and `metadata/`. You can also run sync locally:
+A GitHub Action runs daily: it uses [blog-toolkit](https://pypi.org/project/blog-toolkit/) (via `uvx blog-toolkit pull`) to fetch posts, then ingests the JSON into `posts/` and `metadata/`. The workflow installs [uv](https://github.com/astral-sh/uv) so `uvx` is available.
+
+To run sync locally you need [uv](https://github.com/astral-sh/uv) installed, then:
 
 ```bash
 bun install

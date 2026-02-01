@@ -1,16 +1,17 @@
 /**
- * Sync script for creator repo: reads creator.json, fetches feed(s), writes posts/ and metadata/.
- * Supplements RSS with Substack /archive crawl when blog is Substack (RSS is ~20 posts only).
- * Run from creator repo root: bun run scripts/sync-posts.ts
+ * Sync script for creator repo: runs blog-toolkit pull then ingests JSON into posts/ and metadata/.
+ * Requires uv/uvx and blog-toolkit (uvx blog-toolkit pull). Run from creator repo root: bun run scripts/sync-posts.ts
  */
 
-import Parser from "rss-parser";
 import { readFile, writeFile, mkdir, readdir } from "node:fs/promises";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
+import { spawnSync } from "node:child_process";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const ROOT = join(__dirname, "..");
+
+const BLOG_TOOLKIT_OUTPUT = "blog-toolkit-posts.json";
 
 interface CreatorJson {
   displayName: string;
@@ -19,21 +20,10 @@ interface CreatorJson {
   followUrl?: string | null;
   feedUrls: string[];
   slug: string;
-  supplementStrategy?: "none" | "substack_archive" | "browser";
 }
 
-interface RssItemExtended {
-  content?: string;
-  contentEncoded?: string;
-  contentSnippet?: string;
-  summary?: string;
-  description?: string;
-  link?: string;
-  guid?: string;
-  pubDate?: string;
-  title?: string;
-  [key: string]: unknown;
-}
+/** Blog-toolkit pull output: array of posts or { posts: [...] }. Each post may use link/url, published/pub_date/published_at/date, content/body/description, title, guid/id. */
+type BlogToolkitRaw = unknown;
 
 function slugify(title: string): string {
   return title
@@ -55,7 +45,7 @@ function normalizePostUrl(url: string, base?: string): string {
   try {
     const u = new URL(url.trim(), base || "https://example.com");
     u.hash = "";
-    u.search = u.search || ""; // keep query if present
+    u.search = u.search || "";
     let path = u.pathname.replace(/\/$/, "") || "/";
     u.pathname = path;
     return u.toString();
@@ -64,108 +54,79 @@ function normalizePostUrl(url: string, base?: string): string {
   }
 }
 
-/** Content priority: content (encoded) → snippet → summary → description. */
-function getItemContent(item: RssItemExtended): string {
-  const raw =
-    item.content ??
-    (item as RssItemExtended).contentEncoded ??
-    item.contentSnippet ??
-    item.summary ??
-    item.description;
-  return (typeof raw === "string" ? raw : "") || "See link for full content.";
-}
-
-/** Pub date with fallback and invalid-date guard. */
-function getItemPubDate(item: RssItemExtended): Date | null {
-  const raw = item.pubDate ?? (item as RssItemExtended).updated;
-  if (!raw) return null;
-  const d = new Date(raw);
+/** Parse date from blog-toolkit field (published, pub_date, published_at, date). */
+function parsePostDate(raw: BlogToolkitRaw): Date | null {
+  if (raw == null) return null;
+  const s = typeof raw === "string" ? raw : String(raw);
+  const d = new Date(s);
   return isNaN(d.getTime()) ? null : d;
 }
 
-/** Extract /p/ post URLs from Substack archive HTML (best-effort, no browser). Exclude /p/slug/comments etc. */
-function extractSubstackPostUrls(html: string, archiveBaseUrl: string): string[] {
-  const seen = new Set<string>();
-  const base = archiveBaseUrl.replace(/\/?$/, "");
-  const origin = new URL(base).origin;
-
-  // 1) Match href="..."/p/... or href='...'/p/...
-  const hrefRe = /href\s*=\s*["']([^"']*\/p\/[^"']+)["']/gi;
-  let m: RegExpExecArray | null;
-  while ((m = hrefRe.exec(html)) !== null) {
-    const raw = m[1].trim();
-    try {
-      const u = new URL(raw, base);
-      if (!u.pathname.includes("/p/")) continue;
-      const match = u.pathname.match(/^\/p\/([^/]+)\/?$/);
-      if (!match) continue;
-      u.hash = "";
-      u.pathname = `/p/${match[1]}`;
-      u.search = "";
-      const normalized = u.toString();
-      if (!seen.has(normalized)) seen.add(normalized);
-    } catch {
-      // skip invalid
-    }
-  }
-
-  // 2) Fallback: find /p/slug anywhere in HTML (e.g. in JSON or data), exclude /p/slug/comments
-  const slugRe = /\/p\/([^/"'\s]+)/g;
-  while ((m = slugRe.exec(html)) !== null) {
-    const slug = m[1];
-    if (!slug || slug === "comments") continue;
-    try {
-      const normalized = `${origin}/p/${slug}`;
-      if (!seen.has(normalized)) seen.add(normalized);
-    } catch {
-      // skip
-    }
-  }
-
-  return [...seen];
+/** Get link from blog-toolkit post: link or url. */
+function getPostLink(post: Record<string, unknown>, blogUrl: string): string | null {
+  const link = (post.link ?? post.url) as string | undefined;
+  if (typeof link === "string" && link.trim()) return normalizePostUrl(link, blogUrl);
+  return null;
 }
 
-/** Slug from Substack post path: /p/slug-here -> slug-here */
-function slugFromSubstackPath(url: string): string {
-  try {
-    const u = new URL(url);
-    const match = u.pathname.match(/\/p\/([^/]+)/);
-    return match ? slugify(match[1]) : slugify(url);
-  } catch {
-    return slugify(url);
-  }
+/** Get content from blog-toolkit post: content, body, or description. */
+function getPostContent(post: Record<string, unknown>): string {
+  const raw = (post.content ?? post.body ?? post.description) as string | undefined;
+  return (typeof raw === "string" ? raw : "").trim() || "See link for full content.";
 }
 
-async function main() {
-  const creatorPath = join(ROOT, "creator.json");
-  const raw = await readFile(creatorPath, "utf-8");
-  const creator: CreatorJson = JSON.parse(raw);
-  const feedUrls = Array.isArray(creator.feedUrls) ? creator.feedUrls : [creator.feedUrls].filter(Boolean);
-  if (feedUrls.length === 0) {
-    console.error("No feedUrls in creator.json");
-    process.exit(1);
+/** Get title from blog-toolkit post. */
+function getPostTitle(post: Record<string, unknown>): string {
+  const t = post.title as string | undefined;
+  return (typeof t === "string" ? t : "").trim() || "Untitled";
+}
+
+/** Get guid from blog-toolkit post: guid or id or link. */
+function getPostGuid(post: Record<string, unknown>, link: string): string {
+  const g = (post.guid ?? post.id ?? post.link ?? post.url) as string | undefined;
+  return (typeof g === "string" ? g : "").trim() || link;
+}
+
+/**
+ * Ingest blog-toolkit pull JSON into posts/ and metadata/.
+ * Handles top-level array or { posts: [...] }. Maps link/url, published/pub_date/published_at/date, content/body/description, title, guid/id.
+ * Returns number of posts written.
+ */
+async function ingestBlogToolkitJson(
+  jsonPath: string,
+  rootDir: string,
+  creator: CreatorJson
+): Promise<number> {
+  const raw = await readFile(jsonPath, "utf-8");
+  const data = JSON.parse(raw) as BlogToolkitRaw;
+
+  let items: Record<string, unknown>[];
+  if (Array.isArray(data)) {
+    items = data as Record<string, unknown>[];
+  } else if (data && typeof data === "object" && "posts" in data && Array.isArray((data as { posts: unknown }).posts)) {
+    items = (data as { posts: Record<string, unknown>[] }).posts;
+  } else {
+    throw new Error("blog-toolkit JSON must be an array of posts or { posts: [...] }");
   }
 
-  await mkdir(join(ROOT, "posts"), { recursive: true });
-  await mkdir(join(ROOT, "metadata"), { recursive: true });
+  const blogUrl = (creator.blogUrl || "").trim();
+  const feedUrl = (Array.isArray(creator.feedUrls) && creator.feedUrls[0]) || blogUrl || "";
+  const source = blogUrl.includes("substack.com") ? "substack" : "blog";
 
-  const parser = new Parser({
-    customFields: {
-      item: [["content:encoded", "contentEncoded"]],
-    },
-  });
+  const postsDir = join(rootDir, "posts");
+  const metadataDir = join(rootDir, "metadata");
+  await mkdir(postsDir, { recursive: true });
+  await mkdir(metadataDir, { recursive: true });
 
-  // URL-first dedup: load existing posts by URL and by filename
   const seenUrls = new Set<string>();
   const seenFilenames = new Set<string>();
-  const metadataDir = join(ROOT, "metadata");
-  const postsDir = join(ROOT, "posts");
+
   const existingMeta = await readdir(metadataDir).catch(() => []);
   for (const f of existingMeta) {
     if (!f.endsWith(".json")) continue;
     try {
       const metaRaw = await readFile(join(metadataDir, f), "utf-8");
-      const meta = JSON.parse(metaRaw);
+      const meta = JSON.parse(metaRaw) as { link?: string };
       if (meta.link) seenUrls.add(normalizePostUrl(meta.link));
     } catch {
       // ignore
@@ -176,113 +137,81 @@ async function main() {
     if (f.endsWith(".md")) seenFilenames.add(f.replace(/\.md$/, ""));
   }
 
-  const source = creator.blogUrl?.includes("substack.com") ? "substack" : "blog";
-  let writtenRss = 0;
+  let written = 0;
+  for (const post of items) {
+    if (!post || typeof post !== "object") continue;
+    const link = getPostLink(post as Record<string, unknown>, blogUrl);
+    if (!link) continue;
+    const normalized = normalizePostUrl(link, blogUrl);
+    if (seenUrls.has(normalized)) continue;
+    seenUrls.add(normalized);
 
-  // --- RSS phase ---
-  for (const feedUrl of feedUrls) {
-    try {
-      const feed = await parser.parseURL(feedUrl);
-      const feedLink = feed.link ? normalizePostUrl(feed.link, feedUrl) : feedUrl;
-      for (const item of feed.items || []) {
-        const rawLink = item.link || item.guid;
-        if (!rawLink) continue;
-        const link = normalizePostUrl(rawLink, feedLink);
-        if (seenUrls.has(link)) continue;
-        seenUrls.add(link);
-
-        const pubDate = getItemPubDate(item as RssItemExtended);
-        const dateStr = pubDate ? formatDate(pubDate) : "unknown";
-        const title = (item.title || "Untitled").trim();
-        const slug = slugify(title);
-        let baseName = `${dateStr}_${slug}`;
-        if (seenFilenames.has(baseName)) {
-          let n = 1;
-          while (seenFilenames.has(`${baseName}-${n}`)) n++;
-          baseName = `${baseName}-${n}`;
-        }
-        seenFilenames.add(baseName);
-
-        const content = getItemContent(item as RssItemExtended);
-        const meta = {
-          title,
-          link,
-          published: pubDate ? pubDate.toISOString() : null,
-          updated: pubDate ? pubDate.toISOString() : undefined,
-          source,
-          feedUrl,
-          description: (item.contentSnippet ?? item.summary ?? item.description)?.slice(0, 500) || undefined,
-          guid: item.guid || link,
-        };
-
-        const mdPath = join(ROOT, "posts", `${baseName}.md`);
-        const mdContent = `# ${title}\n\n- **Published:** ${dateStr}\n- **Link:** ${link}\n\n${content}\n`;
-        await writeFile(mdPath, mdContent, "utf-8");
-
-        const metaPath = join(ROOT, "metadata", `${baseName}.json`);
-        await writeFile(metaPath, JSON.stringify(meta, null, 2), "utf-8");
-        writtenRss++;
-      }
-    } catch (err) {
-      console.error(`Failed to fetch ${feedUrl}:`, err);
+    const pubDate = parsePostDate(
+      (post as Record<string, unknown>).published ??
+        (post as Record<string, unknown>).pub_date ??
+        (post as Record<string, unknown>).published_at ??
+        (post as Record<string, unknown>).date
+    );
+    const dateStr = pubDate ? formatDate(pubDate) : "unknown";
+    const title = getPostTitle(post as Record<string, unknown>);
+    const slug = slugify(title);
+    let baseName = `${dateStr}_${slug}`;
+    if (seenFilenames.has(baseName)) {
+      let n = 1;
+      while (seenFilenames.has(`${baseName}-${n}`)) n++;
+      baseName = `${baseName}-${n}`;
     }
+    seenFilenames.add(baseName);
+
+    const content = getPostContent(post as Record<string, unknown>);
+    const meta = {
+      title,
+      link: normalized,
+      published: pubDate ? pubDate.toISOString() : null,
+      updated: pubDate ? pubDate.toISOString() : undefined,
+      source,
+      feedUrl,
+      description: (content.slice(0, 500) !== content ? content.slice(0, 500) + "…" : content) || undefined,
+      guid: getPostGuid(post as Record<string, unknown>, normalized),
+    };
+
+    const mdPath = join(postsDir, `${baseName}.md`);
+    const mdContent = `# ${title}\n\n- **Published:** ${dateStr}\n- **Link:** ${normalized}\n\n${content}\n`;
+    await writeFile(mdPath, mdContent, "utf-8");
+
+    const metaPath = join(metadataDir, `${baseName}.json`);
+    await writeFile(metaPath, JSON.stringify(meta, null, 2), "utf-8");
+    written++;
   }
 
-  // --- Substack archive supplement ---
-  let writtenArchive = 0;
+  return written;
+}
+
+async function main(): Promise<void> {
+  const creatorPath = join(ROOT, "creator.json");
+  const raw = await readFile(creatorPath, "utf-8");
+  const creator: CreatorJson = JSON.parse(raw);
+
   const blogUrl = (creator.blogUrl || "").trim();
-  const isSubstack = blogUrl.includes("substack.com");
-  const strategy = creator.supplementStrategy ?? (isSubstack ? "substack_archive" : "none");
-  if (isSubstack && strategy === "substack_archive") {
-    try {
-      const archiveUrl = new URL("/archive", blogUrl).href;
-      const res = await fetch(archiveUrl, {
-        headers: {
-          "User-Agent":
-            "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-        },
-      });
-      const html = await res.text();
-      const postUrls = extractSubstackPostUrls(html, archiveUrl);
-      for (const postUrl of postUrls) {
-        const normalized = normalizePostUrl(postUrl, blogUrl);
-        if (seenUrls.has(normalized)) continue;
-        seenUrls.add(normalized);
-
-        const slug = slugFromSubstackPath(postUrl);
-        const baseName = `unknown_${slug}`;
-        let finalBase = baseName;
-        if (seenFilenames.has(finalBase)) {
-          let n = 1;
-          while (seenFilenames.has(`${baseName}-${n}`)) n++;
-          finalBase = `${baseName}-${n}`;
-        }
-        seenFilenames.add(finalBase);
-
-        const meta = {
-          title: "Untitled",
-          link: normalized,
-          published: null,
-          source: "substack",
-          feedUrl: feedUrls[0],
-          guid: normalized,
-          supplement: true,
-        };
-
-        const mdPath = join(ROOT, "posts", `${finalBase}.md`);
-        const mdContent = `# Untitled\n\n- **Published:** unknown\n- **Link:** ${normalized}\n\nSee link for full content.\n`;
-        await writeFile(mdPath, mdContent, "utf-8");
-
-        const metaPath = join(ROOT, "metadata", `${finalBase}.json`);
-        await writeFile(metaPath, JSON.stringify(meta, null, 2), "utf-8");
-        writtenArchive++;
-      }
-    } catch (err) {
-      console.error("Substack archive fetch failed:", err);
-    }
+  if (!blogUrl) {
+    console.error("creator.json must have blogUrl for blog-toolkit sync.");
+    process.exit(1);
   }
 
-  console.log(`Synced ${writtenRss} from RSS; ${writtenArchive} from archive.`);
+  const outPath = join(ROOT, BLOG_TOOLKIT_OUTPUT);
+  const result = spawnSync("uvx", ["blog-toolkit", "pull", blogUrl, "-o", outPath, "--format", "json"], {
+    cwd: ROOT,
+    stdio: "inherit",
+    shell: false,
+  });
+
+  if (result.status !== 0) {
+    console.error("blog-toolkit pull failed (exit code", result.status, ").");
+    process.exit(result.status ?? 1);
+  }
+
+  const written = await ingestBlogToolkitJson(outPath, ROOT, creator);
+  console.log("Synced", written, "posts from blog-toolkit.");
 }
 
 main();
