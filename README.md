@@ -6,8 +6,8 @@ Tooling to create **creator repos** (one per blogger) and an **index repo** that
 
 Run the interactive flow without cloning this repo:
 
-- **Bun:** `bunx github:leoguinan/orange-tpot`
-- **Node:** `npx github:leoguinan/orange-tpot` (Bun is recommended; the CLI targets Bun)
+- **Bun:** `bunx github:metaspn/orange-tpot-tooling`
+- **Node:** `npx github:metaspn/orange-tpot-tooling` (Bun is recommended; the CLI targets Bun)
 
 Running the command with **no arguments** starts the **interactive** flow: pick from a master list, enter a creator manually, or use a local blogger directory.
 

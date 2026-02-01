@@ -4,7 +4,7 @@
  */
 
 export const DEFAULT_MASTER_LIST_URL =
-  "https://raw.githubusercontent.com/leoguinan/orange-tpot/main/data/creators.json";
+  "https://raw.githubusercontent.com/metaspn/orange-tpot-tooling/main/data/creators.json";
 
 export function getMasterListUrl(override?: string): string {
   if (override && override.trim()) return override.trim();

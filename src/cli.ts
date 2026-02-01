@@ -58,7 +58,20 @@ interface MasterListEntry {
 
 async function fetchMasterList(url: string): Promise<MasterListEntry[]> {
   const res = await fetch(url);
-  const raw = await res.json();
+  const text = await res.text();
+  if (!res.ok) {
+    throw new Error(
+      `Master list URL returned ${res.status} (expected 200). Check that the repo and data/creators.json exist. URL: ${url}`
+    );
+  }
+  let raw: unknown;
+  try {
+    raw = JSON.parse(text);
+  } catch {
+    throw new Error(
+      `Master list URL did not return valid JSON (got ${text.slice(0, 80)}...). Check the URL.`
+    );
+  }
   if (Array.isArray(raw)) return raw as MasterListEntry[];
   if (raw && typeof raw === "object" && Array.isArray((raw as { creators?: unknown }).creators)) {
     return (raw as { creators: MasterListEntry[] }).creators;
