@@ -197,8 +197,9 @@ async function runInteractiveMainMenu(args: Record<string, string | boolean>): P
   console.log("  1) Create a creator repo");
   console.log("  2) Create an index repo");
   console.log("  3) Add a creator repo to an index");
-  console.log("  4) Exit");
-  const choice = await question(rl, "Choice (1-4)", "1");
+  console.log("  4) Bootstrap index (create index + all creators from master list)");
+  console.log("  5) Exit");
+  const choice = await question(rl, "Choice (1-5)", "1");
   rl.close();
 
   if (choice === "1") {
@@ -231,8 +232,22 @@ async function runInteractiveMainMenu(args: Record<string, string | boolean>): P
     const resolvedSlug = slug || repo.replace(/\/$/, "").split("/").pop()?.replace(/\.git$/, "") || "creator";
     await addCreatorToIndex(indexPath, repo, resolvedSlug, sub.toLowerCase() === "y" || sub.toLowerCase() === "yes");
     console.log(`Added ${repo} to index (slug: ${resolvedSlug})`);
+  } else if (choice === "4") {
+    const r3 = createInterface({ input: process.stdin, output: process.stdout });
+    const indexDir = await question(r3, "Index directory [./index-repo]", "./index-repo");
+    const limitStr = await question(r3, "Limit number of creators (blank = all)", "");
+    const repoBaseUrl = await question(r3, "Repo base URL (e.g. https://github.com/myorg, blank = REPLACE_ME)", "");
+    r3.close();
+    const bootstrapArgs: Record<string, string | boolean> = {
+      "index-dir": indexDir.startsWith("/") ? indexDir : join(process.cwd(), indexDir),
+      "list-url": args["list-url"] as string | undefined,
+      "dry-run": false,
+    };
+    if (limitStr.trim()) bootstrapArgs["limit"] = limitStr.trim();
+    if (repoBaseUrl.trim()) bootstrapArgs["repo-base-url"] = repoBaseUrl.trim();
+    await bootstrapIndex(bootstrapArgs);
   }
-  // choice 4: Exit — do nothing
+  // choice 5: Exit — do nothing
 }
 
 async function createCreator(args: Record<string, string | boolean>): Promise<void> {
