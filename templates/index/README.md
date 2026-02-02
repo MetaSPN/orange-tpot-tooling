@@ -14,7 +14,11 @@ From the index repo root, run sync (blog-toolkit pull + ingest) in every creator
 bun run sync-all
 ```
 
-Runs sequentially; each creator repo needs [uv](https://github.com/astral-sh/uv) for `uvx blog-toolkit pull`. Then run `bun run update-manifest` to refresh `creators/manifest.json`.
+- Uses current state: ingest dedupes by URL so re-runs don’t re-download existing posts.
+- Failed repos are retried once by default; all failures are listed at the end and written to `sync-failures.txt`.
+- Options (pass after `--`): `--delay <sec>` (default 3, delay between repos to reduce rate limiting), `--retries <n>` (default 2 = initial + 1 retry). Example: `bun run sync-all -- --delay 5 --retries 3`.
+
+Each creator repo needs [uv](https://github.com/astral-sh/uv) for `uvx blog-toolkit pull`. Then run `bun run update-manifest` to refresh `creators/manifest.json`.
 
 ## Template updates
 
