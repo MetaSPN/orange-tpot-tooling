@@ -8,7 +8,7 @@ import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawnSync } from "node:child_process";
 import { tmpdir } from "node:os";
-import { getTemplateRepo, getTemplateTarballUrl } from "./config";
+import { getTemplateRepo, getTemplateTarballUrl, TEMPLATE_DEFAULT_REF } from "./config";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -63,12 +63,15 @@ export async function getCurrentVersion(dir: string): Promise<string | null> {
   }
 }
 
-/** Fetch latest release tag from GitHub API. */
+/** Fetch latest release tag from GitHub API. If no releases (404), return default branch (main). */
 export async function fetchLatestVersion(): Promise<string> {
   const repo = getTemplateRepo();
   const res = await fetch(`https://api.github.com/repos/${repo}/releases/latest`, {
     headers: { "User-Agent": "orange-tpot-update" },
   });
+  if (res.status === 404) {
+    return TEMPLATE_DEFAULT_REF;
+  }
   if (!res.ok) {
     throw new Error(`Failed to fetch latest release: ${res.status} ${res.statusText}`);
   }

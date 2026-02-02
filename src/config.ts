@@ -23,9 +23,20 @@ export function getTemplateRepo(override?: string): string {
   return TEMPLATE_REPO;
 }
 
-/** Base URL for GitHub API and tarballs. */
+/** Default branch when repo has no releases (fallback for update). */
+export const TEMPLATE_DEFAULT_REF = "main";
+
+/** Base URL for GitHub tarball. version can be a tag (e.g. 0.1.2 or v0.1.2) or a branch (e.g. main). */
 export function getTemplateTarballUrl(version: string): string {
   const repo = getTemplateRepo();
-  const tag = version.startsWith("v") ? version : `v${version}`;
+  const ref = version.trim();
+  // Branch refs: main, master. Tag refs: 0.1.2, v0.1.2
+  if (ref === "main" || ref === "master" || ref === "HEAD") {
+    return `https://github.com/${repo}/archive/refs/heads/main.tar.gz`;
+  }
+  if (ref === "master") {
+    return `https://github.com/${repo}/archive/refs/heads/master.tar.gz`;
+  }
+  const tag = ref.startsWith("v") ? ref : `v${ref}`;
   return `https://github.com/${repo}/archive/refs/tags/${tag}.tar.gz`;
 }
