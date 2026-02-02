@@ -6,6 +6,26 @@ This repo aggregates metadata for creator repos. Use it to track updates and bui
 - **creators/repos.json** — Config: list of creator repo URLs (or paths) to include. Edit this to add/remove creators; the workflow reads it to refresh the manifest.
 - **subrepos/** — Creator repos (scaffolded locally or added as git submodules). If you used **bootstrap-index** from orange-tpot, all creators were created here; filter by editing `creators/repos.json` or removing `subrepos/<slug>` you don’t want.
 
+## Sync all creator repos
+
+From the index repo root, run sync (blog-toolkit pull + ingest) in every creator under `subrepos/`:
+
+```bash
+bun run sync-all
+```
+
+Runs sequentially; each creator repo needs [uv](https://github.com/astral-sh/uv) for `uvx blog-toolkit pull`. Then run `bun run update-manifest` to refresh `creators/manifest.json`.
+
+## Template updates
+
+This repo is built from the [orange-tpot](https://github.com/metaspn/orange-tpot-tooling) template. The version is in `.orange-tpot-version`. To pull in template changes (workflows, scripts, etc.) without touching `creators/repos.json` or `subrepos/`:
+
+```bash
+bunx github:metaspn/orange-tpot-tooling update
+```
+
+A GitHub Action runs **Update from template** weekly and on manual trigger.
+
 ## Update workflow
 
 The GitHub Action runs on a schedule and on manual trigger. It:

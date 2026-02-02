@@ -78,6 +78,18 @@ Each creator repo gets:
 
   Appends the repo to `creators/repos.json`. With `--submodule`, runs `git submodule add <url> subrepos/<slug>`. Run this from the **index repo** directory or pass `--index-dir <path>`.
 
+### Update from template
+
+Creator and index repos track the template version in `.orange-tpot-version`. To pull in template changes (workflows, scripts, README, etc.) without touching your data:
+
+- **From a creator or index repo:**  
+  `bunx github:metaspn/orange-tpot-tooling update`  
+  or `bun run src/cli.ts update` when developing orange-tpot.
+
+- **Options:** `--dir <path>` (repo to update; default: current directory), `--version <ver>` (template version to apply; default: latest GitHub release).
+
+Template-owned files are overwritten; `creator.json`, `posts/`, `metadata/`, `creators/repos.json`, and `subrepos/` are never touched. A GitHub Action in each template runs **Update from template** weekly (Sunday 00:00 UTC) and on manual dispatch, so repos can get updates automatically.
+
 ## After scaffolding
 
 ### Creator repo
@@ -102,6 +114,8 @@ Then add the repo to your index (from the index repo):
 ### Index repo
 
 Add creator repos as submodules (or list URLs in `creators/repos.json`). The workflow runs on schedule and updates `creators/manifest.json`.
+
+To sync all creator repos under `subrepos/` (blog-toolkit pull + ingest in each), from the index repo run: `bun run sync-all`. Then `bun run update-manifest` to refresh the manifest.
 
 ## Twitter / short-form
 

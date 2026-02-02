@@ -4,6 +4,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "update-manifest": "bun run scripts/update-manifest.ts"
+    "update-manifest": "bun run scripts/update-manifest.ts",
+    "sync-all": "bun run scripts/sync-all-subrepos.ts"
   }
 }

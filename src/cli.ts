@@ -43,6 +43,10 @@ function parseArgs(argv: string[]): Record<string, string | boolean> {
       out["limit"] = argv[++i];
     } else if (arg === "--repo-base-url" && argv[i + 1]) {
       out["repo-base-url"] = argv[++i];
+    } else if (arg === "--dir" && argv[i + 1]) {
+      out["dir"] = argv[++i];
+    } else if (arg === "--version" && argv[i + 1]) {
+      out["version"] = argv[++i];
     }
   }
   return out;
@@ -403,6 +407,29 @@ async function addToIndex(args: Record<string, string | boolean>): Promise<void>
   console.log(`Added ${repo} to index (slug: ${resolvedSlug})`);
 }
 
+async function runUpdateCommand(args: Record<string, string | boolean>): Promise<void> {
+  const dir = (args["dir"] as string) || process.cwd();
+  const targetDir = dir.startsWith("/") ? dir : join(process.cwd(), dir);
+  const versionOverride = args["version"] as string | undefined;
+
+  const { runUpdate, getCurrentVersion, detectRepoType } = await import("./update-from-template");
+  const type = await detectRepoType(targetDir);
+  if (!type) {
+    console.error("Not an orange-tpot repo. Run this from a creator or index repo root, or use --dir <path>.");
+    process.exit(1);
+  }
+  const current = await getCurrentVersion(targetDir);
+  console.log(`Current version: ${current ?? "unknown"}`);
+  console.log(`Updating ${type} repo...`);
+  try {
+    const { version, filesUpdated } = await runUpdate(targetDir, versionOverride);
+    console.log(`Updated to v${version} (${filesUpdated} file(s))`);
+  } catch (err) {
+    console.error(err instanceof Error ? err.message : err);
+    process.exit(1);
+  }
+}
+
 async function main(): Promise<void> {
   const argv = process.argv.slice(2);
   const command = argv[0];
@@ -416,6 +443,8 @@ async function main(): Promise<void> {
     await bootstrapIndex(args);
   } else if (command === "add-to-index") {
     await addToIndex(args);
+  } else if (command === "update") {
+    await runUpdateCommand(args);
   } else if (!command || command === "--help" || command === "-h") {
     if (!command || argv.length === 0) {
       await runInteractiveMainMenu(args);
@@ -430,6 +459,7 @@ Commands:
   create-index                         Create index repo (manifest + update workflow)
   bootstrap-index                      Create index + all creator repos from master list (filter down later)
   add-to-index --repo <url>            Add a creator repo to the index (optionally as submodule)
+  update                               Update this repo from the orange-tpot template (creator or index)
 
 Run with no arguments for the interactive menu (master list, manual entry, or local directory).
 
@@ -458,6 +488,10 @@ Options (add-to-index):
   --submodule          Add as git submodule under subrepos/<slug>
   --dry-run            Print what would be done
 
+Options (update):
+  --dir <path>         Repo to update (default: current directory)
+  --version <ver>      Template version to apply (default: latest release)
+
 Examples:
   bun run src/cli.ts create-creator --user "Holly Elmore"
   bun run src/cli.ts create-creator --all --output-dir ./my-creators --dry-run
@@ -465,6 +499,8 @@ Examples:
   bun run src/cli.ts add-to-index --repo https://github.com/you/holly-elmore-archive --slug holly-elmore --index-dir ./index-repo --submodule
   bun run src/cli.ts bootstrap-index --index-dir ./index-repo --limit 50
   bun run src/cli.ts bootstrap-index --index-dir ./index-repo --repo-base-url https://github.com/myorg
+  bun run src/cli.ts update
+  bun run src/cli.ts update --version 0.1.2
 `);
   } else {
     console.error("Unknown command:", command);
