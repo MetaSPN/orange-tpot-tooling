@@ -5,6 +5,7 @@
  */
 
 import { createInterface } from "node:readline";
+import { mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import { parseBloggerDirectory, findBlogger, bloggerFromManual, type Blogger } from "./parser";
 import { scaffoldCreatorRepo } from "./scaffold-creator";
@@ -38,6 +39,10 @@ function parseArgs(argv: string[]): Record<string, string | boolean> {
       out["discover-feed"] = true;
     } else if (arg === "--list-url" && argv[i + 1]) {
       out["list-url"] = argv[++i];
+    } else if (arg === "--limit" && argv[i + 1]) {
+      out["limit"] = argv[++i];
+    } else if (arg === "--repo-base-url" && argv[i + 1]) {
+      out["repo-base-url"] = argv[++i];
     }
   }
   return out;
@@ -295,6 +300,72 @@ async function createIndex(args: Record<string, string | boolean>): Promise<void
   console.log(`Created index repo at ${outputDir}`);
 }
 
+async function bootstrapIndex(args: Record<string, string | boolean>): Promise<void> {
+  const indexDir = (args["index-dir"] as string) || join(process.cwd(), "index-repo");
+  const listUrlOverride = args["list-url"] as string | undefined;
+  const limitRaw = args["limit"] as string | undefined;
+  const limit = limitRaw ? Math.max(0, parseInt(limitRaw, 10)) : undefined;
+  const repoBaseUrl = (args["repo-base-url"] as string)?.trim();
+  const dryRun = !!args["dry-run"];
+
+  const listUrl = getMasterListUrl(listUrlOverride);
+  let list: MasterListEntry[];
+  try {
+    list = await fetchMasterList(listUrl);
+  } catch (err) {
+    console.error("Failed to fetch master list:", err);
+    process.exit(1);
+  }
+
+  const withFeed = list.filter((e) => e.blogUrl?.trim());
+  const toCreate = limit != null ? withFeed.slice(0, limit) : withFeed;
+  if (toCreate.length === 0) {
+    console.log("No creators with Blog URL in the list.");
+    return;
+  }
+
+  console.log(`Bootstrap: creating index (if needed) and ${toCreate.length} creator repo(s) in ${indexDir}...`);
+
+  if (!dryRun) {
+    const { scaffoldIndexRepo, addCreatorToIndex } = await import("./scaffold-index");
+    const { existsSync } = await import("node:fs");
+    const reposPath = join(indexDir, "creators", "repos.json");
+    if (!existsSync(reposPath)) {
+      await mkdir(indexDir, { recursive: true });
+      await scaffoldIndexRepo(indexDir);
+    }
+    const subreposDir = join(indexDir, "subrepos");
+    await mkdir(subreposDir, { recursive: true });
+
+    for (const e of toCreate) {
+      const blogger = masterEntryToBlogger(e);
+      const repoPath = join(subreposDir, blogger.slug);
+      await scaffoldCreatorRepo(blogger, repoPath);
+      const url = repoBaseUrl
+        ? `${repoBaseUrl.replace(/\/$/, "")}/${blogger.slug}`
+        : `https://github.com/REPLACE_ME/${blogger.slug}`;
+      await addCreatorToIndex(indexDir, url, blogger.slug, false);
+      console.log(`  ${blogger.slug}`);
+    }
+
+    const { spawnSync } = await import("node:child_process");
+    const res = spawnSync("bun", ["run", "update-manifest"], { cwd: indexDir, stdio: "inherit" });
+    if (res.status !== 0) {
+      console.warn("update-manifest failed (run manually from index repo): bun run update-manifest");
+    } else {
+      console.log("Updated creators/manifest.json");
+    }
+  } else {
+    toCreate.slice(0, 5).forEach((e, i) => {
+      const b = masterEntryToBlogger(e);
+      console.log(`  [dry-run] ${i + 1}) ${e.displayName} → subrepos/${b.slug}`);
+    });
+    if (toCreate.length > 5) console.log(`  ... and ${toCreate.length - 5} more`);
+  }
+
+  console.log(`Done. Others can filter the index (edit creators/repos.json or remove subrepos) to keep only the creators they want.`);
+}
+
 async function addToIndex(args: Record<string, string | boolean>): Promise<void> {
   const indexDir = (args["index-dir"] as string) || join(process.cwd(), "index-repo");
   const repo = args["repo"] as string | undefined;
@@ -326,6 +397,8 @@ async function main(): Promise<void> {
     await createCreator(args);
   } else if (command === "create-index") {
     await createIndex(args);
+  } else if (command === "bootstrap-index") {
+    await bootstrapIndex(args);
   } else if (command === "add-to-index") {
     await addToIndex(args);
   } else if (!command || command === "--help" || command === "-h") {
@@ -340,7 +413,8 @@ Commands:
   create-creator --user <id-or-name>   Create repo for one blogger (by hex id or display name)
   create-creator --all                 Create repos for all bloggers that have a Blog URL
   create-index                         Create index repo (manifest + update workflow)
-  add-to-index --repo <url>             Add a creator repo to the index (optionally as submodule)
+  bootstrap-index                      Create index + all creator repos from master list (filter down later)
+  add-to-index --repo <url>            Add a creator repo to the index (optionally as submodule)
 
 Run with no arguments for the interactive menu (master list, manual entry, or local directory).
 
@@ -355,6 +429,13 @@ Options (create-index):
   --output-dir <path>  Where to create index repo (default: ./index-repo)
   --dry-run            Print what would be created
 
+Options (bootstrap-index):
+  --index-dir <path>     Where to create/use index repo (default: ./index-repo)
+  --list-url <url>       Master list URL (default: ORANGE_TPOT_MASTER_LIST_URL or orange-tpot data/creators.json)
+  --limit <n>             Cap number of creators (default: all)
+  --repo-base-url <url>  Base URL for repos in index (e.g. https://github.com/myorg); else REPLACE_ME
+  --dry-run              Print what would be created
+
 Options (add-to-index):
   --repo <url>         Creator repo URL (required)
   --slug <name>        Slug for submodule dir (default: from repo path)
@@ -367,6 +448,8 @@ Examples:
   bun run src/cli.ts create-creator --all --output-dir ./my-creators --dry-run
   bun run src/cli.ts create-index
   bun run src/cli.ts add-to-index --repo https://github.com/you/holly-elmore-archive --slug holly-elmore --index-dir ./index-repo --submodule
+  bun run src/cli.ts bootstrap-index --index-dir ./index-repo --limit 50
+  bun run src/cli.ts bootstrap-index --index-dir ./index-repo --repo-base-url https://github.com/myorg
 `);
   } else {
     console.error("Unknown command:", command);

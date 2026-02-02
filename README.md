@@ -65,6 +65,13 @@ Each creator repo gets:
 
 - **Options:** `--output-dir <path>`, `--dry-run`
 
+### Bootstrap index (all creators from master list)
+
+- `bun run src/cli.ts bootstrap-index`  
+  Creates the index repo (if needed), fetches the master list, scaffolds a creator repo for each entry under `index-repo/subrepos/<slug>`, appends them to `creators/repos.json`, and runs `update-manifest`. Use this to quickly boot an index that others can filter down (edit `repos.json` or remove `subrepos/` they don’t want).
+
+- **Options:** `--index-dir <path>` (default `./index-repo`), `--list-url <url>`, `--limit <n>` (cap number of creators), `--repo-base-url <url>` (e.g. `https://github.com/myorg` so repos get that base; else `REPLACE_ME`), `--dry-run`
+
 ### Add creator to index
 
 - `bun run src/cli.ts add-to-index --repo <creator-repo-url> [--slug <slug>] [--index-dir <path>] [--submodule]`

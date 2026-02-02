@@ -15,10 +15,9 @@ Blog archive and metadata for **{{displayName}}**.
 
 A GitHub Action runs daily: it uses [blog-toolkit](https://pypi.org/project/blog-toolkit/) (via `uvx blog-toolkit pull`) to fetch posts, then ingests the JSON into `posts/` and `metadata/`. The workflow installs [uv](https://github.com/astral-sh/uv) so `uvx` is available.
 
-To run sync locally you need [uv](https://github.com/astral-sh/uv) installed, then:
+To run sync locally you need [uv](https://github.com/astral-sh/uv) and [Bun](https://bun.sh) (or Node). There are no npm dependencies—`bun install` may report "No packages!" which is expected. Then:
 
 ```bash
-bun install
 bun run sync
 ```
 
